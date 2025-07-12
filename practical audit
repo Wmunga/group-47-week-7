@@ -1,0 +1,92 @@
+step by step instructions 
+setup
+import necessary libraries 
+pip install aif360 pandas matplotlib seaborn scikit-learn
+Load and Preprocess Dataset
+from aif360.datasets import CompasDataset
+from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
+from aif360.algorithms.preprocessing import Reweighing
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Load dataset
+dataset_orig = CompasDataset()
+
+# Split into train/test
+dataset_orig_train, dataset_orig_test = dataset_orig.split([0.7], shuffle=True)
+
+# Privileged and unprivileged groups
+privileged_groups = [{'race': 1}]  # Caucasian
+unprivileged_groups = [{'race': 0}]  # African-American
+Bias Metrics Before Remediation
+metric_orig_train = BinaryLabelDatasetMetric(dataset_orig_train,
+                                             unprivileged_groups=unprivileged_groups,
+                                             privileged_groups=privileged_groups)
+
+print("Disparate impact (train):", metric_orig_train.disparate_impact())
+Apply Remediation (Reweighing)
+RW = Reweighing(unprivileged_groups=unprivileged_groups,
+                privileged_groups=privileged_groups)
+
+dataset_transf_train = RW.fit_transform(dataset_orig_train)
+Train Model & Evaluate Bias
+from sklearn.linear_model import LogisticRegression
+from aif360.algorithms.inprocessing import PrejudiceRemover
+from aif360.metrics import ClassificationMetric
+
+# Standardize features
+scaler = StandardScaler()
+X_train = scaler.fit_transform(dataset_transf_train.features)
+y_train = dataset_transf_train.labels.ravel()
+
+model = LogisticRegression()
+model.fit(X_train, y_train)
+
+# Predict on test set
+X_test = scaler.transform(dataset_orig_test.features)
+y_pred = model.predict(X_test)
+
+# Attach predictions
+dataset_orig_test_pred = dataset_orig_test.copy()
+dataset_orig_test_pred.labels = y_pred
+
+# Evaluate bias after model
+metric_test = ClassificationMetric(dataset_orig_test,
+                                   dataset_orig_test_pred,
+                                   unprivileged_groups=unprivileged_groups,
+                                   privileged_groups=privileged_groups)
+
+print("False Positive Rate difference:", metric_test.false_positive_rate_difference())
+print("Disparate impact (test):", metric_test.disparate_impact())
+Visualize Bias
+import numpy as np
+
+labels = ['FPR Difference']
+values = [metric_test.false_positive_rate_difference()]
+
+plt.bar(labels, values, color='skyblue')
+plt.title('False Positive Rate Disparity by Race')
+plt.axhline(0, color='red', linestyle='--')
+plt.ylabel('Difference (Unprivileged - Privileged)')
+plt.show()
+
+Bias Audit Report on COMPAS Dataset
+
+We audited the COMPAS Recidivism Dataset for racial bias using IBM’s AI Fairness 360 toolkit. This dataset is widely used to predict recidivism risk scores for criminal defendants. However, it has drawn criticism due to alleged racial disparities in its predictions, particularly between African-American and Caucasian individuals.
+
+In our analysis, we first evaluated the original dataset using the BinaryLabelDatasetMetric from AIF360. The disparate impact score was significantly below the fairness threshold (typically 0.8), indicating a potential bias against African-American defendants. Additionally, we observed a positive false positive rate (FPR) difference, meaning African-Americans were more likely to be incorrectly labeled as high-risk.
+
+To mitigate this bias, we applied the Reweighing algorithm, which adjusts instance weights during training to balance privileged and unprivileged groups. After retraining a logistic regression model on the transformed data, we reassessed fairness using the ClassificationMetric. The FPR difference decreased, showing improved fairness, although some disparity remained.
+
+We also visualized the false positive rate disparity, highlighting the gap between racial groups. This reinforces the importance of using fairness-aware tools when building or deploying AI systems in high-stakes domains like criminal justice.
+
+Recommendations:
+
+Continue exploring other mitigation strategies like Adversarial Debiasing or Prejudice Remover.
+
+Increase transparency in how models are trained and used in real-world decisions.
+
+Advocate for inclusive data practices to ensure better representation of all demographic groups.
+
+In conclusion, while fairness in AI is a complex issue, tools like AIF360 offer meaningful ways to detect and reduce bias, leading to more ethical and equitable machine learning systems.
